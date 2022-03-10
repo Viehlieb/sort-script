@@ -1,23 +1,20 @@
 
 package org.plainpicture.sorting;
 
-import org.elasticsearch.common.Nullable;
-import org.elasticsearch.script.ExecutableScript;
-import org.elasticsearch.script.NativeScriptFactory;
-import org.elasticsearch.script.AbstractDoubleSearchScript;
+import org.apache.lucene.index.LeafReaderContext;
+import org.elasticsearch.script.ScoreScript;
+import org.elasticsearch.script.NumberSortScript;
 import org.elasticsearch.index.fielddata.ScriptDocValues;
-import org.elasticsearch.search.lookup.IndexLookup;
-import org.elasticsearch.search.lookup.TermPosition;
-import org.elasticsearch.search.lookup.IndexFieldTerm;
-import org.elasticsearch.search.lookup.IndexField;
-import org.elasticsearch.search.lookup.PositionIterator;
+import org.elasticsearch.search.lookup.SearchLookup;
+
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Random;
 
-public class SortScript extends AbstractDoubleSearchScript {
+public class SortScript extends NumberSortScript {
   private Map<Long, List<Double>> countryBoosts;
   private List<String> keywords;
 
@@ -32,10 +29,16 @@ public class SortScript extends AbstractDoubleSearchScript {
   private double supplierRand, supplierWeight;
   private boolean ignorePrimaryRank;
   private Random random;
-
+  private SearchLookup lookupa;
+  private LeafReaderContext context;
   private long now;
 
-  public SortScript(Map<String, Object> params) {
+
+  public SortScript(Map<String, Object> params, SearchLookup lookup, LeafReaderContext ctxt) {
+    super(params, lookup, ctxt);
+    context = ctxt;
+    lookupa = lookup;
+    System.out.println("im Script");
     countryBoosts = new HashMap();
 
     Map<String, Map> mapping = (Map<String, Map>)params.get("country_boosts");
@@ -49,7 +52,7 @@ public class SortScript extends AbstractDoubleSearchScript {
 
       countryBoosts.put(new Long(entry.getKey()), boosts);
     }
-
+    System.out.println("XXXXXXXXXXXXXX Im Konstruktor" );
     keywords = (List<String>)params.get("keywords");
 
     offset = (int)params.get("offset");
@@ -77,14 +80,20 @@ public class SortScript extends AbstractDoubleSearchScript {
 
     now = System.currentTimeMillis();
     random = new Random();
+    // if (lookupa.doc().getLeafDocLookup(context) != null){
+    //   System.out.println("XXXXXXXXXXXXXXX LeafDocLookup: " + lookupa.doc().getLeafDocLookup(context).values());
+    // }
+    System.out.println("XXXXXXXXXXXXXXX asMap: " + lookupa.getLeafSearchLookup(context).asMap());
   }
 
-  public double runAsDouble() {
+
+
+  public double runAsDouble(){
+    System.out.println("XXXXXXXXXXXXX I RUN AS DOUBLE");
     long primaryRank = ignorePrimaryRank ? -1 : getPrimaryRank();
     double baseScore = 0.0;
 
     random.setSeed((int)(getRand() * 100000));
-
     if(primaryRank != -1) {
       if(primaryRank < offset)
         return offset + (offset - (double)primaryRank);
@@ -132,18 +141,19 @@ public class SortScript extends AbstractDoubleSearchScript {
     double res = 0.0;
     int n = 0;
 
+
     if(keywords.size() == 0)
       return 0.0;
 
-    IndexField termScores = termScores(keywordField);
+    // // IndexField termScores = termScores(keywordField);
 
-    for(String keyword : keywords) {
-      for(TermPosition termPosition : termScores.get(keyword, IndexLookup.FLAG_PAYLOADS | IndexLookup.FLAG_CACHE)) {
-        res += termPosition.payloadAsFloat(0.0f);
+    // // for(String keyword : keywords) {
+    //   // for(TermPosition termPosition : termScores.get(keyword, IndexLookup.FLAG_PAYLOADS | IndexLookup.FLAG_CACHE)) {
+    //      res += 0;//termPosition.payloadAsFloat(0.0f);
 
-        n++;
-      }
-    }
+    //      n++;
+    //   // }
+    // // }
 
     if(n == 0)
       return 0.0;
@@ -151,9 +161,13 @@ public class SortScript extends AbstractDoubleSearchScript {
     return res / (double)n;
   }
 
-  protected IndexField termScores(String fieldName) {
-    return indexLookup().get(fieldName);
-  }
+  // IndexField interface to all information regarding a field
+  // protected IndexField termScores(String fieldName) {
+  //   //returns IndexFieldTerm
+  //   // hold all information regarding a term
+  //   // 
+  //   return indexLookup().get(fieldName);
+  //}
 
   private double ageScore() {
     Long value = getLong("batched_at", -1l);
@@ -177,20 +191,21 @@ public class SortScript extends AbstractDoubleSearchScript {
   }
 
   protected double getDouble(String fieldName, double defaultValue) {
-    ScriptDocValues.Doubles value = docFieldDoubles(fieldName);
-
-    if(value == null || value.isEmpty())
-      return defaultValue;
-
-    return value.getValue();
+    double value = get_score();
+    return value;
   }
 
   protected long getLong(String fieldName, long defaultValue) {
-    ScriptDocValues.Longs value = docFieldLongs(fieldName);
+    long value = Double.valueOf(get_score()).longValue();
 
-    if(value == null || value.isEmpty())
-      return defaultValue;
+    return value;
+  }
 
-    return value.getValue();
+
+  @Override
+  public double execute() {
+    // TODO Auto-generated method stub
+    System.out.println("XXXXXXXXXXX sort-script result: " + runAsDouble());
+    return runAsDouble();
   }
 }
