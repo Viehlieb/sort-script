@@ -1,0 +1,143 @@
+double checkDouble(def val){
+        return (val != null) ? (double) val : 0.0d;  
+  }  
+  long checkLong(def val)
+  {    
+    return (val != null) ? (long) val : -1l;  
+  }
+  int checkInteger(def val)
+  {    
+    return (val != null) ? (int) val : -1;  
+  }
+  double ageScore(def batched_at, def now) 
+  {  
+    def value = checkLong(batched_at.toEpochSecond()*1000);
+     if(value == -1) return 0.0;
+    return Math.pow(1.0 - Math.pow(((double)now - Math.min((double)now, (double)value)) / ((double)now - 978307200000.0), 0.75), 2.0);
+  }
+  Double getCountryBoost(HashMap map,long countryId, int index) {
+    def list = map.get(checkInteger(countryId));
+    if(list == null)
+      return 0.0;
+
+    return list[index];
+  }
+  long getKeywordCountryId(String field)
+     {    return checkLong(field);  }
+  long getCreatorCountryId(String field)
+    {    return checkLong(field);  }
+  double getRand(def rand) {    return checkDouble(rand);  }
+  
+  double keywordScore(def field, def keywords)
+  {  
+    def res = 0.0;
+    int n = 0;
+    if (keywords.size() == 0)
+    {    
+      return 0.0;
+    }
+    if (field == "\u007c" || field == null)
+    {
+      return 0.0;
+    } 
+    def term_scores_array= field.splitOnToken(" ");
+    for (String s : term_scores_array)  
+    {    
+      String[] element = s.splitOnToken("\u007c");
+      if(keywords.contains(element[0].trim()))
+      {      
+        res += Double.parseDouble(element[1].trim());    
+      }    
+      n++;
+    }
+    if (n== 0)  
+    {    
+      return 0.0;
+    } 
+    double nDouble = n;
+    return (res /  nDouble);
+  }
+  long getPrimaryRank(def primary_rank)
+  {    
+     return  checkLong(primary_rank);  
+  }  
+  double collectionScore(def collection_score) 
+  {    
+    return checkDouble(collection_score);  
+  }  
+  double supplierScore(def supplier_score) 
+  {    
+    return checkDouble(supplier_score);  
+  }  
+  double baseScore(def score) 
+  {    
+    return checkDouble(score);  
+  }  
+  def now = System.currentTimeMillis();
+  def random = new Random();
+  long primaryRank = (doc.containsKey('primary_rank') && doc.primary_rank.size() > 0) ? doc.primary_rank.value : -1l;
+  primaryRank = params.ignore_primary_rank ? -1l : primaryRank;
+  String term_scores_field;
+  if (params.keyword_field== "term_scores.de")
+  {
+    term_scores_field= params._source.term_scores.de;
+  } 
+  else if (params.keyword_field=="term_scores.en")
+  {
+    term_scores_field= params._source.term_scores.en;
+  }
+  else if (params.keyword_field=="term_scores.fr")
+  {
+    term_scores_field= params._source.term_scores.fr;
+  }
+  else
+  { 
+    term_scores_field= "\u007c";
+  }
+  def keywords = params.keywords;
+  def countryBoosts = params.country_boosts;
+  def keyword_country_id = (doc.containsKey('keyword_country_id') && doc.keyword_country_id.size() > 0) ? doc.keyword_country_id.value :-1l;
+  def creator_country_id = (doc.containsKey('creator_country_id') && doc.creator_country_id.size() > 0) ? doc.creator_country_id.value :-1l;
+
+  HashMap countryBoostsMap = new HashMap();
+  if(countryBoosts.size()>0)
+  {
+    for (int i = 0; i < countryBoosts.length - 2;i= i+3)
+    {
+      countryBoostsMap.put(countryBoosts[i],[countryBoosts[i+1],countryBoosts[i+2]])
+    }
+  }
+  else
+  {
+    countryBoostsMap.put(keyword_country_id,[0,0]);
+    countryBoostsMap.put(creator_country_id,[0,0]);
+  }
+  double baseScore = 0.0;
+  random.setSeed((int)(getRand(doc.rand.value) * 100000));
+  def offset = (params.offset != null)? params.offset : 0;    
+  def batched_at = (doc.containsKey('batched_at') && doc.batched_at.size()>0) ? doc.batched_at.value : -1;
+  def supplier_score = (doc.containsKey('supplier_score') && doc.supplier_score.size()>0) ? doc.supplier_score.value : -1;
+  def collection_score = (doc.containsKey('collection_score') && doc.collection_score.size()>0) ? doc.collection_score.value : -1;
+  if(primaryRank != -1) 
+  {      
+    if(primaryRank < offset)
+    {
+      return offset + (offset - (double)primaryRank);  
+    }    
+    else        
+    {
+      baseScore = 1.0 - ((double)primaryRank - offset) / offset;
+    }
+  } 
+  else 
+  {      
+    baseScore = params.base_weight > 0 ? baseScore((doc.containsKey('score') && doc.score.size()>0) ? doc.score.value : 0) : 0.0;
+  }
+  offset + baseScore * (1.0 - params.base_rand * random.nextDouble()) * params.base_weight 
+  + ageScore(batched_at, now) * (1.0 - params.age_rand * random.nextDouble()) * params.age_weight + keywordScore(term_scores_field, keywords) * (1.0 - params.keyword_rand * random.nextDouble()) * params.keyword_weight  +
+  ( params.country_weight <= 0 ? 0.0 :
+  getCountryBoost(countryBoostsMap,keyword_country_id, 0) * (1.0 - params.country_rand * random.nextDouble()) * params.country_weight * 0.5 +
+  getCountryBoost(countryBoostsMap,creator_country_id,1) * (1.0 - params.country_rand * random.nextDouble()) * params.country_weight * 0.5
+        )
+  +
+  ((params.collection_weight > 0) ? (collectionScore(collection_score) * (1.0 - params.collection_rand * random.nextDouble()) * params.collection_weight) : 0.0)      + ((params.supplier_weight > 0) ? supplierScore(supplier_score) * (1.0 - params.supplier_rand * random.nextDouble()) * params.supplier_weight : 0.0);
